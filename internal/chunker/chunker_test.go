@@ -1,140 +1,111 @@
 package chunker
 
 import (
-	"strings"
 	"testing"
 )
 
-func TestEstimateTokens(t *testing.T) {
-	tests := []struct {
-		name     string
-		text     string
-		expected int
-	}{
-		{
-			name:     "empty string",
-			text:     "",
-			expected: 0,
-		},
-		{
-			name:     "short text",
-			text:     "Hi",
-			expected: 1, // 2/4 = 0, min 1
-		},
-		{
-			name:     "typical title",
-			text:     "iPhone 12 Pro en buen estado",
-			expected: 7, // 28/4 = 7
-		},
-		{
-			name:     "long description",
-			text:     "Este es un artículo de alta calidad con muchas características increíbles",
-			expected: 19, // 75/4 = 18.75, rounded to 19
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := EstimateTokens(tt.text)
-			if result != tt.expected {
-				t.Errorf("EstimateTokens(%q) = %d, want %d", tt.text, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestChunkByTokens(t *testing.T) {
+func TestChunkTexts(t *testing.T) {
 	tests := []struct {
 		name           string
 		texts          []string
-		maxTokens      int
+		maxTexts       int
 		expectedChunks int
+		expectedSizes  []int
 	}{
 		{
 			name:           "empty input",
 			texts:          []string{},
-			maxTokens:      100,
+			maxTexts:       50,
 			expectedChunks: 0,
+			expectedSizes:  nil,
 		},
 		{
 			name:           "nil input",
 			texts:          nil,
-			maxTokens:      100,
+			maxTexts:       50,
 			expectedChunks: 0,
+			expectedSizes:  nil,
 		},
 		{
-			name:           "single text fits",
-			texts:          []string{"Hello world"},
-			maxTokens:      100,
+			name:           "single text",
+			texts:          []string{"Hello"},
+			maxTexts:       50,
 			expectedChunks: 1,
+			expectedSizes:  []int{1},
 		},
 		{
-			name:           "multiple texts fit in one chunk",
-			texts:          []string{"Hello", "World", "Test"},
-			maxTokens:      100,
+			name:           "exactly max texts",
+			texts:          makeTexts(50),
+			maxTexts:       50,
 			expectedChunks: 1,
+			expectedSizes:  []int{50},
 		},
 		{
-			name: "texts split into multiple chunks",
-			texts: []string{
-				strings.Repeat("a", 40), // 10 tokens
-				strings.Repeat("b", 40), // 10 tokens
-				strings.Repeat("c", 40), // 10 tokens
-			},
-			maxTokens:      15, // Each text is 10 tokens, so 3 chunks
-			expectedChunks: 3,
-		},
-		{
-			name: "each text in own chunk",
-			texts: []string{
-				strings.Repeat("a", 40), // 10 tokens
-				strings.Repeat("b", 40), // 10 tokens
-			},
-			maxTokens:      10, // Exactly fits one
+			name:           "one over max",
+			texts:          makeTexts(51),
+			maxTexts:       50,
 			expectedChunks: 2,
+			expectedSizes:  []int{50, 1},
 		},
 		{
-			name: "oversized text gets own chunk",
-			texts: []string{
-				"small",
-				strings.Repeat("x", 200), // 50 tokens, exceeds max
-				"another",
-			},
-			maxTokens:      20,
-			expectedChunks: 3, // small+another could fit, but oversized breaks it
+			name:           "100 texts in 2 chunks",
+			texts:          makeTexts(100),
+			maxTexts:       50,
+			expectedChunks: 2,
+			expectedSizes:  []int{50, 50},
+		},
+		{
+			name:           "150 texts in 3 chunks",
+			texts:          makeTexts(150),
+			maxTexts:       50,
+			expectedChunks: 3,
+			expectedSizes:  []int{50, 50, 50},
+		},
+		{
+			name:           "uses default when maxTexts is 0",
+			texts:          makeTexts(60),
+			maxTexts:       0,
+			expectedChunks: 2,
+			expectedSizes:  []int{50, 10},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			chunks := ChunkByTokens(tt.texts, tt.maxTokens)
+			chunks := ChunkTexts(tt.texts, tt.maxTexts)
 
 			if len(chunks) != tt.expectedChunks {
-				t.Errorf("ChunkByTokens() returned %d chunks, want %d", len(chunks), tt.expectedChunks)
+				t.Errorf("ChunkTexts() returned %d chunks, want %d", len(chunks), tt.expectedChunks)
 			}
 
-			// Verify all texts are preserved
+			for i, expectedSize := range tt.expectedSizes {
+				if i < len(chunks) && len(chunks[i]) != expectedSize {
+					t.Errorf("chunk[%d] has %d texts, want %d", i, len(chunks[i]), expectedSize)
+				}
+			}
+
+			// Verify all texts are preserved in order
 			var allTexts []string
 			for _, chunk := range chunks {
 				allTexts = append(allTexts, chunk...)
 			}
 
 			if len(allTexts) != len(tt.texts) {
-				t.Errorf("ChunkByTokens() lost texts: got %d, want %d", len(allTexts), len(tt.texts))
+				t.Errorf("ChunkTexts() lost texts: got %d, want %d", len(allTexts), len(tt.texts))
 			}
 
 			for i, text := range tt.texts {
 				if i < len(allTexts) && allTexts[i] != text {
-					t.Errorf("ChunkByTokens() text[%d] = %q, want %q", i, allTexts[i], text)
+					t.Errorf("ChunkTexts() text[%d] = %q, want %q", i, allTexts[i], text)
 				}
 			}
 		})
 	}
 }
 
-func TestChunkByTokens_PreservesOrder(t *testing.T) {
+func TestChunkTexts_PreservesOrder(t *testing.T) {
 	texts := []string{"first", "second", "third", "fourth", "fifth"}
-	chunks := ChunkByTokens(texts, 10)
+	chunks := ChunkTexts(texts, 2)
 
 	var result []string
 	for _, chunk := range chunks {
@@ -148,11 +119,11 @@ func TestChunkByTokens_PreservesOrder(t *testing.T) {
 	}
 }
 
-func TestChunkByTokens_DefaultMaxTokens(t *testing.T) {
-	texts := []string{"test"}
-	chunks := ChunkByTokens(texts, 0) // Should use default
-
-	if len(chunks) != 1 {
-		t.Errorf("ChunkByTokens with 0 maxTokens should use default, got %d chunks", len(chunks))
+// Helper to create N texts
+func makeTexts(n int) []string {
+	texts := make([]string, n)
+	for i := range texts {
+		texts[i] = "text"
 	}
+	return texts
 }

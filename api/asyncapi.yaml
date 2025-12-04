@@ -1,0 +1,174 @@
+asyncapi: 3.0.0
+info:
+  title: Pricofy Translation Manager
+  version: 1.0.0
+  description: |
+    Translation orchestrator microservice for Pricofy.
+    
+    Routes translation requests to specialized translator Lambdas:
+    - Direct translations (e.g., ES→EN): 1 Lambda call
+    - Pivot translations (e.g., ES→FR): 2 Lambda calls via English
+    
+    **Supported Languages (40+):**
+    - Core: ES, FR, IT, PT, DE, EN
+    - Spanish variants: es_AR, es_MX, es_ES, etc.
+    - French variants: fr_CA, fr_BE, etc.
+    - Portuguese variants: pt_BR, pt_PT, gl (Galician)
+    - Extended Romance: ca (Catalan), ro (Romanian), la (Latin), etc.
+    
+    **Chunking:** Automatically splits input into batches of 50 texts
+    for optimal Lambda memory usage.
+    
+    **Deployment:** AWS Lambda with direct invoke (Lambda-to-Lambda SDK)
+    
+    **Invocation:** This service is invoked via AWS Lambda SDK, not HTTP/API Gateway.
+  contact:
+    name: Carlos Nebrera
+    email: carlos@pricofy.com
+  license:
+    name: Proprietary
+
+servers:
+  production:
+    host: lambda://pricofy-translation-manager
+    protocol: lambda
+    description: "AWS Lambda Direct Invoke (function: pricofy-translation-manager)"
+
+operations:
+  translate:
+    action: receive
+    channel:
+      $ref: '#/channels/translate'
+    summary: Translate texts between supported languages
+    description: |
+      Translates a batch of texts from source language to target language.
+      
+      **Routing Logic:**
+      - Romance → EN: Uses `translator-romance-en`
+      - EN → Romance: Uses `translator-en-romance`
+      - DE → EN: Uses `translator-de-en`
+      - EN → DE: Uses `translator-en-de`
+      - Romance ↔ Romance: Pivots through EN (2 calls)
+      - Romance ↔ DE: Pivots through EN (2 calls)
+      
+      **Chunking:**
+      Input is automatically split into chunks of 50 texts each.
+      All chunks are sent in a single Lambda invocation.
+
+channels:
+  translate:
+    address: lambda://pricofy-translation-manager
+    messages:
+      TranslateRequest:
+        $ref: '#/components/messages/TranslateRequest'
+      TranslateResponse:
+        $ref: '#/components/messages/TranslateResponse'
+
+components:
+  messages:
+    TranslateRequest:
+      name: TranslateRequest
+      title: Translation Request
+      summary: Request to translate texts
+      payload:
+        type: object
+        required: [texts, sourceLang, targetLang]
+        properties:
+          texts:
+            type: array
+            items:
+              type: string
+            description: |
+              Array of texts to translate.
+              Maximum recommended: 300 texts per request.
+              Empty strings are preserved in output.
+            minItems: 0
+            maxItems: 500
+            example: ["Hola mundo", "iPhone en perfecto estado"]
+          sourceLang:
+            type: string
+            description: |
+              Source language code.
+              Supports ISO 639-1 codes and regional variants.
+            example: "es"
+            enum:
+              - es
+              - es_AR
+              - es_MX
+              - es_ES
+              - fr
+              - fr_CA
+              - fr_BE
+              - it
+              - pt
+              - pt_BR
+              - pt_PT
+              - de
+              - en
+              - ca
+              - ro
+              - gl
+              - la
+          targetLang:
+            type: string
+            description: |
+              Target language code.
+              Must be different from sourceLang.
+            example: "en"
+    
+    TranslateResponse:
+      name: TranslateResponse
+      title: Translation Response
+      summary: Response from translation operation
+      payload:
+        type: object
+        properties:
+          translations:
+            type: array
+            items:
+              type: string
+            description: |
+              Translated texts in same order as input.
+              Empty input strings result in empty output strings.
+            example: ["Hello world", "iPhone in perfect condition"]
+          chunksProcessed:
+            type: integer
+            minimum: 0
+            description: Number of chunks processed (50 texts per chunk)
+            example: 3
+          error:
+            type: string
+            description: Error message if translation failed
+            example: "unsupported language pair: zh→en"
+
+  schemas:
+    SupportedLanguages:
+      type: object
+      description: All supported language codes
+      properties:
+        core:
+          type: array
+          items:
+            type: string
+          description: Core languages
+          example: ["es", "fr", "it", "pt", "de", "en"]
+        spanish_variants:
+          type: array
+          items:
+            type: string
+          example: ["es_AR", "es_CL", "es_CO", "es_MX", "es_ES"]
+        french_variants:
+          type: array
+          items:
+            type: string
+          example: ["fr_CA", "fr_BE", "fr_FR", "oc", "wa"]
+        portuguese_variants:
+          type: array
+          items:
+            type: string
+          example: ["pt_BR", "pt_PT", "gl", "mwl"]
+        extended_romance:
+          type: array
+          items:
+            type: string
+          example: ["ca", "ro", "la", "rm", "co", "nap", "scn"]

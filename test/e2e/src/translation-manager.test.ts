@@ -1,9 +1,14 @@
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import { fromIni } from '@aws-sdk/credential-provider-ini';
 
 const FUNCTION_NAME = 'pricofy-translation-manager';
 const REGION = process.env.AWS_REGION || 'eu-west-1';
+const PROFILE = process.env.AWS_PROFILE || 'pricofy-dev';
 
-const lambda = new LambdaClient({ region: REGION });
+const lambda = new LambdaClient({
+  region: REGION,
+  credentials: fromIni({ profile: PROFILE }),
+});
 
 interface TranslationRequest {
   texts: string[];
@@ -34,15 +39,14 @@ async function invokeManager(request: TranslationRequest): Promise<TranslationRe
 }
 
 describe('Translation Manager E2E', () => {
-  // Increase timeout for Lambda cold starts
-  jest.setTimeout(30000);
+  jest.setTimeout(60000);
 
   describe('Basic Translation', () => {
-    it('should translate single text es→fr', async () => {
+    it('should translate single text es→en', async () => {
       const response = await invokeManager({
         texts: ['Hola mundo'],
         sourceLang: 'es',
-        targetLang: 'fr',
+        targetLang: 'en',
       });
 
       expect(response.error).toBeUndefined();
@@ -51,19 +55,15 @@ describe('Translation Manager E2E', () => {
       expect(response.chunksProcessed).toBe(1);
     });
 
-    it('should translate batch of texts', async () => {
+    it('should translate batch of 10 texts', async () => {
       const response = await invokeManager({
-        texts: [
-          'iPhone 12 Pro en buen estado',
-          'MacBook Pro M2 poco uso',
-          'Coche seminuevo con pocos kilómetros',
-        ],
+        texts: Array.from({ length: 10 }, (_, i) => `Producto número ${i}`),
         sourceLang: 'es',
-        targetLang: 'it',
+        targetLang: 'fr',
       });
 
       expect(response.error).toBeUndefined();
-      expect(response.translations).toHaveLength(3);
+      expect(response.translations).toHaveLength(10);
       expect(response.chunksProcessed).toBe(1);
     });
 
@@ -80,37 +80,98 @@ describe('Translation Manager E2E', () => {
     });
   });
 
-  describe('Language Pairs', () => {
-    const pairs = [
-      ['es', 'fr'],
-      ['es', 'it'],
-      ['es', 'pt'],
-      ['es', 'de'],
-      ['fr', 'es'],
-      ['it', 'de'],
-    ];
+  describe('Core Language Pairs (6 languages)', () => {
+    const coreLanguages = ['es', 'fr', 'it', 'pt', 'de', 'en'];
 
-    test.each(pairs)('should translate %s→%s', async (source, target) => {
+    const sampleTexts: Record<string, string> = {
+      es: 'Hola mundo',
+      fr: 'Bonjour le monde',
+      it: 'Ciao mondo',
+      pt: 'Olá mundo',
+      de: 'Hallo Welt',
+      en: 'Hello world',
+    };
+
+    // Generate all 30 pairs
+    const corePairs: [string, string][] = [];
+    for (const source of coreLanguages) {
+      for (const target of coreLanguages) {
+        if (source !== target) {
+          corePairs.push([source, target]);
+        }
+      }
+    }
+
+    test.each(corePairs)('should translate %s → %s', async (source, target) => {
       const response = await invokeManager({
-        texts: ['Prueba de traducción'],
+        texts: [sampleTexts[source]],
         sourceLang: source,
         targetLang: target,
       });
 
       expect(response.error).toBeUndefined();
       expect(response.translations).toHaveLength(1);
+      expect(response.translations![0]).toBeTruthy();
     });
   });
 
+  describe('Extended Romance Languages', () => {
+    const extendedPairs: [string, string, string][] = [
+      ['ca', 'en', 'Bon dia'],
+      ['en', 'ca', 'Good morning'],
+      ['ro', 'en', 'Bună ziua'],
+      ['gl', 'en', 'Bos días'],
+      ['la', 'en', 'Salve'],
+    ];
+
+    test.each(extendedPairs)(
+      'should translate %s → %s',
+      async (source, target, text) => {
+        const response = await invokeManager({
+          texts: [text],
+          sourceLang: source,
+          targetLang: target,
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.translations).toHaveLength(1);
+      }
+    );
+  });
+
+  describe('Language Variants', () => {
+    const variantPairs: [string, string, string][] = [
+      ['es_MX', 'en', '¿Qué onda?'],
+      ['en', 'es_MX', 'Hello friend'],
+      ['pt_BR', 'en', 'Olá, tudo bem?'],
+      ['en', 'pt_BR', 'Hello, how are you?'],
+      ['fr_CA', 'en', 'Bonjour'],
+    ];
+
+    test.each(variantPairs)(
+      'should translate %s → %s',
+      async (source, target, text) => {
+        const response = await invokeManager({
+          texts: [text],
+          sourceLang: source,
+          targetLang: target,
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.translations).toHaveLength(1);
+      }
+    );
+  });
+
   describe('Error Handling', () => {
-    it('should return error for unsupported pair', async () => {
+    it('should return error for unsupported language', async () => {
       const response = await invokeManager({
         texts: ['Hello'],
-        sourceLang: 'es',
-        targetLang: 'en', // English not supported
+        sourceLang: 'zh',
+        targetLang: 'en',
       });
 
-      expect(response.error).toContain('no translator');
+      expect(response.error).toBeTruthy();
     });
 
     it('should return error for same source and target', async () => {
@@ -132,74 +193,186 @@ describe('Translation Manager E2E', () => {
 
       expect(response.error).toContain('sourceLang');
     });
-  });
 
-  describe('Chunking', () => {
-    it('should handle large batch with multiple chunks', async () => {
-      // Generate 100 texts (~4000 tokens, should create 2+ chunks)
-      const texts = Array.from(
-        { length: 100 },
-        (_, i) => `Producto número ${i} en venta con excelentes condiciones`
-      );
-
+    it('should return error for missing targetLang', async () => {
       const response = await invokeManager({
-        texts,
+        texts: ['Hello'],
         sourceLang: 'es',
-        targetLang: 'fr',
+        targetLang: '',
       });
 
-      expect(response.error).toBeUndefined();
-      expect(response.translations).toHaveLength(100);
-      expect(response.chunksProcessed).toBeGreaterThanOrEqual(2);
+      expect(response.error).toContain('targetLang');
     });
+  });
 
-    it('should preserve text order across chunks', async () => {
-      const texts = Array.from({ length: 50 }, (_, i) => `Texto número ${i}`);
+  describe('Chunking (50 texts per chunk)', () => {
+    it('should handle 50 texts in 1 chunk', async () => {
+      const texts = Array.from({ length: 50 }, (_, i) => `Producto ${i}`);
 
       const response = await invokeManager({
         texts,
         sourceLang: 'es',
-        targetLang: 'fr',
+        targetLang: 'en',
       });
 
       expect(response.error).toBeUndefined();
       expect(response.translations).toHaveLength(50);
+      expect(response.chunksProcessed).toBe(1);
+    });
 
-      // Verify order by checking each translation contains corresponding number
-      for (let i = 0; i < 50; i++) {
+    it('should handle 100 texts in 2 chunks', async () => {
+      const texts = Array.from({ length: 100 }, (_, i) => `Producto ${i}`);
+
+      const response = await invokeManager({
+        texts,
+        sourceLang: 'es',
+        targetLang: 'en',
+      });
+
+      expect(response.error).toBeUndefined();
+      expect(response.translations).toHaveLength(100);
+      expect(response.chunksProcessed).toBe(2);
+    });
+
+    it('should handle 150 texts in 3 chunks', async () => {
+      const texts = Array.from({ length: 150 }, (_, i) => `Producto ${i}`);
+
+      const response = await invokeManager({
+        texts,
+        sourceLang: 'es',
+        targetLang: 'en',
+      });
+
+      expect(response.error).toBeUndefined();
+      expect(response.translations).toHaveLength(150);
+      expect(response.chunksProcessed).toBe(3);
+    });
+
+    it('should preserve text order across chunks', async () => {
+      const texts = Array.from({ length: 100 }, (_, i) => `Texto número ${i}`);
+
+      const response = await invokeManager({
+        texts,
+        sourceLang: 'es',
+        targetLang: 'en',
+      });
+
+      expect(response.error).toBeUndefined();
+      expect(response.translations).toHaveLength(100);
+
+      // Verify order by checking numbers are preserved
+      for (let i = 0; i < 100; i++) {
         expect(response.translations![i]).toContain(String(i));
       }
     });
   });
 
+  describe('Pivot Translations (via EN)', () => {
+    it('should handle ES→FR via EN pivot', async () => {
+      const response = await invokeManager({
+        texts: ['Buenos días amigo'],
+        sourceLang: 'es',
+        targetLang: 'fr',
+      });
+
+      expect(response.error).toBeUndefined();
+      expect(response.translations).toHaveLength(1);
+    });
+
+    it('should handle DE→ES via EN pivot', async () => {
+      const response = await invokeManager({
+        texts: ['Guten Tag'],
+        sourceLang: 'de',
+        targetLang: 'es',
+      });
+
+      expect(response.error).toBeUndefined();
+      expect(response.translations).toHaveLength(1);
+    });
+
+    it('should handle 50 texts with pivot', async () => {
+      const texts = Array.from({ length: 50 }, (_, i) => `Produkt ${i}`);
+
+      const response = await invokeManager({
+        texts,
+        sourceLang: 'de',
+        targetLang: 'es',
+      });
+
+      expect(response.error).toBeUndefined();
+      expect(response.translations).toHaveLength(50);
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('should handle texts with special characters', async () => {
+      const response = await invokeManager({
+        texts: ['¿Cómo estás? ¡Bien!', 'Ñoño señor', 'Prix: 100€'],
+        sourceLang: 'es',
+        targetLang: 'en',
+      });
+
+      expect(response.error).toBeUndefined();
+      expect(response.translations).toHaveLength(3);
+    });
+
+    it('should handle empty strings in batch', async () => {
+      const response = await invokeManager({
+        texts: ['Hola', '', 'Mundo', ''],
+        sourceLang: 'es',
+        targetLang: 'en',
+      });
+
+      expect(response.error).toBeUndefined();
+      expect(response.translations).toHaveLength(4);
+      expect(response.translations![1]).toBe('');
+      expect(response.translations![3]).toBe('');
+    });
+  });
+
   describe('Performance', () => {
-    it('should complete single text translation in < 5s', async () => {
+    it('should complete 1 text in < 5s', async () => {
       const start = Date.now();
 
       await invokeManager({
         texts: ['Prueba rápida'],
         sourceLang: 'es',
-        targetLang: 'fr',
+        targetLang: 'en',
       });
 
       const duration = Date.now() - start;
-      console.log(`Single text latency: ${duration}ms`);
+      console.log(`1 text: ${duration}ms`);
       expect(duration).toBeLessThan(5000);
     });
 
-    it('should complete batch translation in < 10s', async () => {
+    it('should complete 50 texts in < 10s', async () => {
       const texts = Array.from({ length: 50 }, (_, i) => `Producto ${i}`);
       const start = Date.now();
 
       await invokeManager({
         texts,
         sourceLang: 'es',
-        targetLang: 'it',
+        targetLang: 'en',
       });
 
       const duration = Date.now() - start;
-      console.log(`Batch (50 texts) latency: ${duration}ms`);
+      console.log(`50 texts: ${duration}ms`);
       expect(duration).toBeLessThan(10000);
+    });
+
+    it('should complete 150 texts in < 30s', async () => {
+      const texts = Array.from({ length: 150 }, (_, i) => `Producto ${i}`);
+      const start = Date.now();
+
+      await invokeManager({
+        texts,
+        sourceLang: 'es',
+        targetLang: 'en',
+      });
+
+      const duration = Date.now() - start;
+      console.log(`150 texts (3 chunks): ${duration}ms`);
+      expect(duration).toBeLessThan(30000);
     });
   });
 });

@@ -2,7 +2,11 @@
  * Translation Manager Stack
  *
  * Deploys the Go Lambda that orchestrates translation requests.
- * Routes to translator-{src}-{tgt} Lambdas, handles chunking.
+ * Routes to 4 single-direction translator Lambdas:
+ * - translator-romance-en: ES/FR/IT/PT → EN
+ * - translator-en-romance: EN → ES/FR/IT/PT
+ * - translator-de-en: DE → EN
+ * - translator-en-de: EN → DE
  */
 
 import * as cdk from 'aws-cdk-lib';
@@ -16,8 +20,13 @@ export interface TranslationManagerStackProps extends cdk.StackProps {
   environment: 'dev' | 'prod';
 }
 
-// Supported language pairs (without English)
-const LANGUAGES = ['es', 'it', 'pt', 'fr', 'de'];
+// The 4 translator Lambdas
+const TRANSLATORS = [
+  'translator-romance-en',
+  'translator-en-romance',
+  'translator-de-en',
+  'translator-en-de',
+];
 
 export class TranslationManagerStack extends cdk.Stack {
   public readonly managerFunction: lambda.Function;
@@ -34,7 +43,7 @@ export class TranslationManagerStack extends cdk.Stack {
       architecture: lambda.Architecture.ARM_64,
       handler: 'bootstrap',
       code: lambda.Code.fromAsset(path.join(__dirname, '../../dist')),
-      timeout: cdk.Duration.seconds(60),
+      timeout: cdk.Duration.seconds(120),
       memorySize: 128,
       environment: {
         ENVIRONMENT: environment,
@@ -42,19 +51,15 @@ export class TranslationManagerStack extends cdk.Stack {
       description: `Translation orchestrator - routes to translator Lambdas (${environment})`,
     });
 
-    // Grant invoke permissions on all translator Lambdas
-    for (const source of LANGUAGES) {
-      for (const target of LANGUAGES) {
-        if (source !== target) {
-          const functionArn = `arn:aws:lambda:${this.region}:${this.account}:function:pricofy-translator-${source}-${target}`;
-          this.managerFunction.addToRolePolicy(
-            new iam.PolicyStatement({
-              actions: ['lambda:InvokeFunction'],
-              resources: [functionArn],
-            })
-          );
-        }
-      }
+    // Grant invoke permissions on all 4 translator Lambdas
+    for (const translator of TRANSLATORS) {
+      const functionArn = `arn:aws:lambda:${this.region}:${this.account}:function:pricofy-${translator}`;
+      this.managerFunction.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['lambda:InvokeFunction'],
+          resources: [functionArn],
+        })
+      );
     }
 
     // Log group

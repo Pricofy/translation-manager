@@ -6,7 +6,8 @@
     "test": "jest --runInBand"
   },
   "dependencies": {
-    "@aws-sdk/client-lambda": "^3.700.0"
+    "@aws-sdk/client-lambda": "^3.700.0",
+    "@aws-sdk/credential-provider-ini": "^3.943.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",

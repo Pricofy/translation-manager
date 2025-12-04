@@ -18,8 +18,8 @@ type Request struct {
 
 // Response is the output from the translation manager.
 type Response struct {
-	Translations    []string `json:"translations,omitempty"`
-	ChunksProcessed int      `json:"chunksProcessed,omitempty"`
+	Translations    []string `json:"translations"`
+	ChunksProcessed int      `json:"chunksProcessed"`
 	Error           string   `json:"error,omitempty"`
 }
 
@@ -43,15 +43,15 @@ func Handle(ctx context.Context, req Request) (*Response, error) {
 		return &Response{Error: fmt.Sprintf("failed to create router: %v", err)}, nil
 	}
 
-	// Check if direct translation is available
-	if !r.HasDirectPair(req.SourceLang, req.TargetLang) {
+	// Check if translation is possible (direct or via pivoting)
+	if !r.IsValidPair(req.SourceLang, req.TargetLang) {
 		return &Response{
-			Error: fmt.Sprintf("no translator for %s→%s", req.SourceLang, req.TargetLang),
+			Error: fmt.Sprintf("unsupported language pair: %s→%s", req.SourceLang, req.TargetLang),
 		}, nil
 	}
 
-	// Chunk the texts by token count
-	chunks := chunker.ChunkByTokens(req.Texts, chunker.DefaultMaxTokens)
+	// Chunk texts (max 50 per chunk for optimal Lambda memory usage)
+	chunks := chunker.ChunkTexts(req.Texts, chunker.DefaultMaxTextsPerChunk)
 
 	// Send ALL chunks in a single Lambda invocation
 	// The translator processes them sequentially internally
