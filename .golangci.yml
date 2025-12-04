@@ -1,0 +1,98 @@
+# ========================================
+# golangci-lint Configuration
+# ========================================
+# Purpose: Configure static code analysis for Go codebase
+# Documentation: https://golangci-lint.run/usage/configuration/
+
+# Configuration version (required for golangci-lint v2.x)
+version: 2
+
+# Run configuration
+run:
+  # Timeout for the entire linting process
+  timeout: 5m
+  
+  # Include test files in linting
+  tests: true
+  
+  # Skip directories that don't contain Go code
+  skip-dirs:
+    - infrastructure
+    - test/e2e
+
+# Linters to enable
+linters:
+  enable:
+    # Error handling
+    - errcheck          # Check for unchecked errors
+    
+    # Security
+    - gosec             # Security vulnerability detection
+    
+    # Standard Go tools
+    - govet             # Go compiler's vet tool
+    - staticcheck       # Advanced static analysis
+    
+    # Code quality
+    - unused            # Detect unused code
+    - ineffassign       # Detect ineffectual assignments
+    - gocritic          # Most opinionated Go code linter
+    - revive            # Fast, configurable, extensible linter
+    
+    # Code style
+    - misspell          # Detect common misspellings
+    
+    # Complexity and duplication
+    - gocyclo           # Detect cyclomatic complexity
+    - gocognit          # Detect cognitive complexity
+
+# Linter-specific settings
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  
+  gosec:
+    severity: medium
+    confidence: medium
+    excludes:
+      - G104 # Errors unhandled (handled by errcheck)
+  
+  govet:
+    check-shadowing: true
+  
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+  
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+      - name: error-return
+        severity: error
+  
+  gocyclo:
+    min-complexity: 15
+  
+  gocognit:
+    min-complexity: 15
+
+# Issue configuration
+issues:
+  exclude-rules:
+    # Be less strict on test files
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+        - gocognit
+    # Exclude infrastructure directory
+    - path: infrastructure/
+      linters:
+        - all
+  
+  max-issues-per-linter: 0
+  max-same-issues: 0
