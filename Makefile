@@ -104,8 +104,12 @@ test-e2e: ## Run E2E tests (requires deployed Lambda)
 # -----------------------------------------------------------------------------
 
 .PHONY: deploy
-deploy: build deploy-cdk ## Build and deploy
-	@echo "Deployed to $(ENV)!"
+deploy: clean install build lint test deploy-cdk ## Safe deployment (clean + install + build + lint + test + deploy)
+	@echo "✅ Deployed to $(ENV)!"
+
+.PHONY: deploy-quick
+deploy-quick: build deploy-cdk ## Quick deploy (skips clean/lint/test - use with caution)
+	@echo "⚡ Quick deployment to $(ENV)!"
 
 .PHONY: deploy-cdk
 deploy-cdk: ## Deploy CDK stack
