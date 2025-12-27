@@ -73,12 +73,12 @@ vet: ## Run go vet
 build: ## Build Go binary for Lambda (ARM64)
 	@echo "Building Go binary..."
 	@mkdir -p dist
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o dist/bootstrap cmd/lambda/main.go
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o dist/bootstrap ./cmd/lambda/
 	@echo "Binary built: dist/bootstrap"
 
 .PHONY: build-local
 build-local: ## Build for local testing
-	go build -o dist/translation-manager cmd/lambda/main.go
+	go build -o dist/translation-manager ./cmd/lambda/
 
 # -----------------------------------------------------------------------------
 # Test
